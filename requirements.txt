@@ -1,0 +1,7 @@
+pandas
+pytz
+pyarrow
+fastparquet
+pyyaml
+pytest
+pytest-mock

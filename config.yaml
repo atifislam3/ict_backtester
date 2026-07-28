@@ -1,0 +1,18 @@
+instrument: "XAUUSD"
+timeframe: "1H"
+date_range:
+  start: "2023-01-01"
+  end: "2023-01-31"
+risk_per_trade: 0.01 # 1%
+rr_ratio: 2.0
+spread_assumption: 1.5 # pips
+session_times:
+  london:
+    start: "03:00"
+    end: "11:00"
+  ny:
+    start: "08:00"
+    end: "17:00"
+  asian:
+    start: "19:00"
+    end: "03:00"
