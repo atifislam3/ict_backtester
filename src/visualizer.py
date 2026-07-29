@@ -114,8 +114,8 @@ def generate_html_report(
         fig.add_trace(go.Scatter(x=equity_df['timestamp'], y=equity_df['peak'], name='Peak', line=dict(color='#00C851', dash='dash')), row=5, col=1)
         fig.add_trace(go.Scatter(x=equity_df['timestamp'], y=equity_df['equity'], name='Equity', line=dict(color='#33B5E5'), fill='tonexty', fillcolor='rgba(255,68,68,0.2)'), row=5, col=1)
         
-        # Underwater (-drawdown_pct so it points down)
-        fig.add_trace(go.Scatter(x=equity_df['timestamp'], y=-equity_df['drawdown_pct'], name='Drawdown (%)', fill='tozeroy', fillcolor='rgba(255,68,68,0.5)', line=dict(color='#FF4444')), row=5, col=3)
+        # Underwater (-drawdown so it points down)
+        fig.add_trace(go.Scatter(x=equity_df['timestamp'], y=-equity_df['drawdown'], name='Drawdown (%)', fill='tozeroy', fillcolor='rgba(255,68,68,0.5)', line=dict(color='#FF4444')), row=5, col=3)
         
     # 5. Session & Pattern (Row 6)
     sessions = list(stats.breakdown.by_session.keys())
@@ -136,8 +136,9 @@ def generate_html_report(
             monthly_ret.iloc[0] = ((monthly.iloc[0] / initial) - 1) * 100
             
             ret_df = pd.DataFrame({'ret': monthly_ret})
-            ret_df['year'] = ret_df.index.year
-            ret_df['month'] = ret_df.index.strftime('%b')
+            dt_index = pd.DatetimeIndex(ret_df.index)
+            ret_df['year'] = dt_index.year
+            ret_df['month'] = dt_index.strftime('%b')
             pivot = ret_df.pivot(index='year', columns='month', values='ret')
             months_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
             cols = [m for m in months_order if m in pivot.columns]

@@ -57,7 +57,7 @@ def run(
             end_date=cfg.date_range.end
         )
         
-    console.print(f"[green]✓ Data loaded: {len(df)} candles.[/green]")
+    console.print(f"[green][OK] Data loaded: {len(df)} candles.[/green]")
     
     # Convert to candles
     candles = []
@@ -92,7 +92,7 @@ def run(
             progress.advance(task)
             
     trades, equity_df, order_df = engine.get_results()
-    console.print(f"[green]✓ Backtest completed. {len(trades)} trades executed.[/green]")
+    console.print(f"[green][OK] Backtest completed. {len(trades)} trades executed.[/green]")
     
     # 4. Compute Stats
     console.print("[cyan]Computing statistics...[/cyan]")
@@ -109,7 +109,7 @@ def run(
         stats=stats,
         output_dir=cfg.reporting.output_dir
     )
-    console.print(f"[green]✓ Interactive HTML Report generated: {report_path}[/green]")
+    console.print(f"[green][OK] Interactive HTML Report generated: {report_path}[/green]")
     
     if cfg.reporting.save_json:
         os.makedirs(cfg.reporting.output_dir, exist_ok=True)
