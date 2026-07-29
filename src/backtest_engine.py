@@ -13,6 +13,7 @@ class Trade:
     direction: Direction
     stop_loss: float
     take_profit: float
+    pattern_type: str = "UNKNOWN"
     
     exit_time: Optional[pd.Timestamp] = None
     exit_price: Optional[float] = None
@@ -136,7 +137,8 @@ class BacktestEngine:
                         entry_price=entry,
                         direction=triggered['direction'],
                         stop_loss=sl,
-                        take_profit=tp
+                        take_profit=tp,
+                        pattern_type=triggered['type']
                     )
                     # Clear other pending setups when in a trade
                     self.pending_setups.clear()
@@ -176,6 +178,7 @@ class BacktestEngine:
                 'exit_price': t.exit_price,
                 'stop_loss': t.stop_loss,
                 'take_profit': t.take_profit,
+                'pattern_type': t.pattern_type,
                 'result': t.result,
                 'r_multiple': t.r_multiple
             })
