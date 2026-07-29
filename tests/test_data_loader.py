@@ -1,146 +1,66 @@
-"""
-Unit tests for data loader functionality.
-"""
-
-import os
-import pandas as pd
 import pytest
-from unittest.mock import patch, MagicMock
-from pathlib import Path
-from src.data_loader import process_and_cache_data, load_data
+import pandas as pd
+from datetime import datetime
+from unittest.mock import patch
+from src.data_loader import DataLoader, DataQualityError
 
 @pytest.fixture
-def mock_csv_data(tmp_path):
-    """Creates a temporary mocked CSV data file representing raw Dukascopy data."""
-    raw_dir = tmp_path / "data" / "raw"
-    raw_dir.mkdir(parents=True)
-    
-    file_path = raw_dir / "xauusd-mock.csv"
-    
-    # Create simple 1-minute data in UTC for 2 hours
-    dates = pd.date_range(start="2023-01-02 12:00:00", periods=120, freq="1min", tz="UTC")
+def synthetic_1h_data():
+    # Create 48 hours of 1H data starting Monday
+    dates = pd.date_range(start="2024-01-01 00:00:00", periods=48, freq="1h", tz="America/New_York")
     df = pd.DataFrame({
-        "timestamp": dates.view("int64") // 10**6, # convert to ms timestamp
-        "open": [1900.0] * 120,
-        "high": [1905.0] * 120,
-        "low": [1895.0] * 120,
-        "close": [1902.0] * 120,
-        "volume": [100] * 120
-    })
-    
-    df.to_csv(file_path, index=False)
-    return str(file_path)
-
-def test_process_and_cache_data(mock_csv_data, tmp_path, caplog):
-    """Test if processing correctly resamples, sets timezone, and saves to parquet."""
-    processed_dir = tmp_path / "data" / "processed"
-    
-    df = process_and_cache_data(
-        csv_path=mock_csv_data,
-        instrument="XAUUSD",
-        timeframe="1H",
-        processed_dir=str(processed_dir)
-    )
-    
-    # 120 minutes = 2 hours, so resampled 1H data should have 2 rows
-    assert len(df) == 2
-    
-    # Check if timezone is America/New_York
-    assert str(df.index.tz) == "America/New_York"
-    
-    # Check if parquet file was created
-    expected_cache = processed_dir / "XAUUSD_1H.parquet"
-    assert expected_cache.exists()
-    
-    # Check values
-    assert df.iloc[0]["open"] == 1900.0
-    assert df.iloc[0]["volume"] == 6000 # 60 * 100
-    
-    # Verify no gap warnings were emitted for complete data
-    assert "missing/gap candles" not in caplog.text
-
-@patch("src.data_loader.download_dukascopy_data")
-def test_load_data_with_missing_cache(mock_download, mock_csv_data, tmp_path):
-    """Test loading data when cache is missing, triggering a download."""
-    mock_download.return_value = mock_csv_data
-    processed_dir = tmp_path / "data" / "processed"
-    raw_dir = tmp_path / "data" / "raw"
-    
-    df = load_data(
-        instrument="XAUUSD",
-        timeframe="1H",
-        start_date="2023-01-01",
-        end_date="2023-01-05",
-        raw_dir=str(raw_dir),
-        processed_dir=str(processed_dir)
-    )
-    
-    assert mock_download.called
-    assert len(df) == 2
-    assert (processed_dir / "XAUUSD_1H.parquet").exists()
-
-def test_load_data_with_existing_cache(tmp_path):
-    """Test loading data when cache exists, avoiding download."""
-    processed_dir = tmp_path / "data" / "processed"
-    processed_dir.mkdir(parents=True)
-    
-    # Create fake parquet cache
-    dates = pd.date_range(start="2023-01-02 08:00:00", periods=5, freq="1h", tz="America/New_York")
-    df = pd.DataFrame({
-        "open": [1900.0] * 5,
-        "high": [1905.0] * 5,
-        "low": [1895.0] * 5,
-        "close": [1902.0] * 5,
-        "volume": [6000] * 5
+        'open': [100.0] * 48,
+        'high': [105.0] * 48,
+        'low': [95.0] * 48,
+        'close': [102.0] * 48,
+        'volume': [1000] * 48
     }, index=dates)
-    
-    cache_path = processed_dir / "XAUUSD_1H.parquet"
-    df.to_parquet(cache_path)
-    
-    with patch("src.data_loader.download_dukascopy_data") as mock_download:
-        loaded_df = load_data(
-            instrument="XAUUSD",
-            timeframe="1H",
-            start_date="2023-01-01",
-            end_date="2023-01-05",
-            raw_dir=str(tmp_path / "raw"),
-            processed_dir=str(processed_dir)
-        )
-        
-        assert not mock_download.called
-        assert len(loaded_df) == 5
-        assert loaded_df.iloc[0]["open"] == 1900.0
+    df.index.name = 'datetime'
+    return df
 
-def test_gap_detection(tmp_path, caplog):
-    """Test gap validation explicitly triggers logging on missing candles."""
-    raw_dir = tmp_path / "data" / "raw"
-    raw_dir.mkdir(parents=True)
-    file_path = raw_dir / "xauusd-gap.csv"
+@pytest.fixture
+def data_loader(tmp_path):
+    raw_dir = tmp_path / "raw"
+    processed_dir = tmp_path / "processed"
+    return DataLoader(raw_dir=str(raw_dir), processed_dir=str(processed_dir))
+
+def test_session_tagging(data_loader, synthetic_1h_data):
+    tagged_df = data_loader._tag_sessions(synthetic_1h_data)
     
-    # Create data with an intentional 3-hour gap
-    dates_part1 = pd.date_range(start="2023-01-02 10:00:00", periods=60, freq="1min", tz="UTC")
-    dates_part2 = pd.date_range(start="2023-01-02 14:00:00", periods=60, freq="1min", tz="UTC")
-    dates = dates_part1.union(dates_part2)
+    # Check boundaries (times are in America/New_York)
+    # Asian: 19:00 - 03:00
+    assert tagged_df.loc[tagged_df.index.hour == 20, 'session'].iloc[0] == 'Asian'
+    assert tagged_df.loc[tagged_df.index.hour == 2, 'session'].iloc[0] == 'Asian'
     
-    df = pd.DataFrame({
-        "timestamp": dates.view("int64") // 10**6,
-        "open": [1900.0] * 120,
-        "high": [1905.0] * 120,
-        "low": [1895.0] * 120,
-        "close": [1902.0] * 120,
-        "volume": [100] * 120
-    })
+    # London: 03:00 - 08:00 (since 08:00 starts overlap)
+    assert tagged_df.loc[tagged_df.index.hour == 5, 'session'].iloc[0] == 'London'
     
-    df.to_csv(file_path, index=False)
+    # Overlap: 08:00 - 11:00
+    assert tagged_df.loc[tagged_df.index.hour == 9, 'session'].iloc[0] == 'Overlap'
     
-    processed_dir = tmp_path / "data" / "processed"
-    process_and_cache_data(
-        csv_path=str(file_path),
-        instrument="XAUUSD",
-        timeframe="1H",
-        processed_dir=str(processed_dir)
-    )
+    # NY: 11:00 - 17:00
+    assert tagged_df.loc[tagged_df.index.hour == 14, 'session'].iloc[0] == 'NY'
+
+def test_gap_detection_raises_error(data_loader, synthetic_1h_data):
+    # Introduce a 3-hour gap (which is > 1.5x expected 1H interval)
+    df_with_gap = synthetic_1h_data.drop(synthetic_1h_data.index[5:8])
     
-    # Verify the warning was logged for the missing data gap
-    assert "missing/gap candles" in caplog.text
-    assert "Gap detected ending at" in caplog.text
+    with pytest.raises(DataQualityError) as exc_info:
+        data_loader._validate_data(df_with_gap, "1H")
+        
+    assert "missing/gap candles" in str(exc_info.value)
+
+@patch('src.data_loader.yf.download')
+def test_full_load_and_resample(mock_yf_download, data_loader, synthetic_1h_data):
+    # Mock yfinance to return synthetic 1H data
+    mock_yf_download.return_value = synthetic_1h_data
+    
+    # Test resampling to 4H
+    df_4h = data_loader.get_data("XAUUSD", "4H", "2024-01-01", "2024-01-02", force_download=True)
+    
+    # 48 hours of 1H data -> 12 periods of 4H data
+    assert len(df_4h) == 12
+    # Volume should be sum of 4 hours (1000 * 4)
+    assert df_4h['volume'].iloc[0] == 4000
+    # Check caching
+    assert len(list(data_loader.processed_dir.glob("*.parquet"))) == 1

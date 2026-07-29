@@ -1,8 +1,8 @@
-instrument: "XAUUSD"
+instrument: "EURUSD"
 timeframe: "1H"
 date_range:
-  start: "2024-01-01"
-  end: "2024-12-31"
+  start: "2025-01-06"
+  end: "2025-12-31"
 risk_per_trade: 1.0 # percent
 rr_ratio: 2.0
 spread_assumption: 1.5 # pips

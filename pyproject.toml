@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ict-backtester-pro"
+version = "0.1.0"
+description = "A professional, type-safe event-driven backtesting engine for ICT concepts."
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.4.0",
+    "pydantic-settings>=2.0.3",
+    "pandas>=2.0.0",
+    "yfinance>=0.2.30",
+    "pyarrow>=13.0.0",
+    "pytz>=2023.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-mock>=3.11.1",
+    "mypy>=1.5.1",
+    "ruff>=0.0.287",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-select = ["I", "E", "F", "W", "C90", "N", "B", "UP", "ARG", "SIM"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+ignore_missing_imports = true
