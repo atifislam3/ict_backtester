@@ -1,188 +1,195 @@
 import os
 import pandas as pd
-import plotly.graph_objects as go
-import plotly.express as px
+import numpy as np
 from datetime import datetime
-from typing import Dict, Any
+from typing import List
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-class ReportVisualizer:
-    def __init__(self, trades_df: pd.DataFrame, stats: Dict[str, Any], output_dir: str = 'reports'):
-        self.trades_df = trades_df.copy()
-        self.stats = stats
-        self.output_dir = output_dir
+from src.models import Candle, TradeResult
+from src.pattern_detector import SwingPoint, DetailedPatternEvent
+from src.statistics import PerformanceReport
+
+def generate_html_report(
+    candles: List[Candle],
+    swings: List[SwingPoint],
+    patterns: List[DetailedPatternEvent],
+    trades: List[TradeResult],
+    equity_df: pd.DataFrame,
+    stats: PerformanceReport,
+    output_dir: str = 'reports/'
+) -> str:
+    
+    # 1. Setup Grid
+    fig = make_subplots(
+        rows=8, cols=4,
+        specs=[
+            [{"type": "indicator"}, {"type": "indicator"}, {"type": "indicator"}, {"type": "indicator"}],
+            [{"type": "xy", "colspan": 4, "rowspan": 2}, None, None, None],
+            [None, None, None, None],
+            [{"type": "xy", "colspan": 4}, None, None, None],
+            [{"type": "xy", "colspan": 2}, None, {"type": "xy", "colspan": 2}, None],
+            [{"type": "xy", "colspan": 2}, None, {"type": "xy", "colspan": 2}, None],
+            [{"type": "xy", "colspan": 2}, None, {"type": "xy", "colspan": 2}, None],
+            [{"type": "table", "colspan": 4}, None, None, None]
+        ],
+        subplot_titles=(
+            "", "", "", "", 
+            "Price Chart & Patterns", 
+            "Volume", 
+            "Equity Curve", "Underwater Chart (Drawdown)",
+            "Session Win Rate", "Pattern Avg PnL",
+            "Monthly Returns (%)", "R-Multiple Distribution",
+            "Monte Carlo Summary"
+        ),
+        vertical_spacing=0.04,
+        row_heights=[0.05, 0.25, 0.1, 0.05, 0.15, 0.15, 0.15, 0.1]
+    )
+    
+    df_c = pd.DataFrame([vars(c) for c in candles])
+    
+    # 1. Indicators (Row 1)
+    net_profit = sum(t.pnl for t in trades)
+    fig.add_trace(go.Indicator(mode="number", value=net_profit, title={"text": "Net Profit ($)"}, number={'prefix': '$'}), row=1, col=1)
+    fig.add_trace(go.Indicator(mode="number", value=stats.win_rate*100, title={"text": "Win Rate (%)"}, number={'suffix': '%'}), row=1, col=2)
+    pf = stats.profit_factor if stats.profit_factor != float('inf') else 999.99
+    fig.add_trace(go.Indicator(mode="number", value=pf, title={"text": "Profit Factor"}), row=1, col=3)
+    fig.add_trace(go.Indicator(mode="number", value=stats.max_drawdown_pct, title={"text": "Max Drawdown (%)"}, number={'suffix': '%'}), row=1, col=4)
+    
+    # 2. Candlestick (Row 2-3)
+    fig.add_trace(go.Candlestick(
+        x=df_c['timestamp'], open=df_c['open'], high=df_c['high'], low=df_c['low'], close=df_c['close'],
+        increasing_line_color='#00C851', decreasing_line_color='#FF4444', name='Price'
+    ), row=2, col=1)
+    
+    # Overlay Swings
+    sh_ts = [s.timestamp for s in swings if s.type == 'HIGH']
+    sh_p = [s.price for s in swings if s.type == 'HIGH']
+    sl_ts = [s.timestamp for s in swings if s.type == 'LOW']
+    sl_p = [s.price for s in swings if s.type == 'LOW']
+    fig.add_trace(go.Scatter(x=sh_ts, y=sh_p, mode='markers', marker=dict(symbol='diamond', color='#FF4444', size=8), name='Swing High', legendgroup='Swings'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=sl_ts, y=sl_p, mode='markers', marker=dict(symbol='diamond', color='#00C851', size=8), name='Swing Low', legendgroup='Swings'), row=2, col=1)
+    
+    # Overlay BOS & CHoCH
+    for ptype, marker_b, marker_s in [('BOS', 'triangle-up', 'triangle-down'), ('CHoCH', 'star', 'star')]:
+        b_ts = [p.timestamp for p in patterns if p.pattern_type == ptype and p.direction == 'BULLISH']
+        b_p = [p.price_level for p in patterns if p.pattern_type == ptype and p.direction == 'BULLISH']
+        s_ts = [p.timestamp for p in patterns if p.pattern_type == ptype and p.direction == 'BEARISH']
+        s_p = [p.price_level for p in patterns if p.pattern_type == ptype and p.direction == 'BEARISH']
+        fig.add_trace(go.Scatter(x=b_ts, y=b_p, mode='markers', marker=dict(symbol=marker_b, color='#00C851', size=12), name=f'{ptype} Bullish', legendgroup=ptype), row=2, col=1)
+        fig.add_trace(go.Scatter(x=s_ts, y=s_p, mode='markers', marker=dict(symbol=marker_s, color='#FF4444', size=12), name=f'{ptype} Bearish', legendgroup=ptype), row=2, col=1)
         
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
+    # Unmitigated FVGs using polygon patches
+    for direction, color, name in [('BULLISH', 'rgba(0,200,81,0.2)', 'Bullish FVG'), ('BEARISH', 'rgba(255,68,68,0.2)', 'Bearish FVG')]:
+        px, py = [], []
+        for p in patterns:
+            if p.pattern_type == 'FVG' and p.direction == direction and p.metadata.get('status') == 'unmitigated':
+                t_start = p.timestamp
+                t_end = df_c['timestamp'].iloc[-1]
+                top = p.price_levels.get('top', p.price_level)
+                bot = p.price_levels.get('bottom', p.price_level)
+                px.extend([t_start, t_end, t_end, t_start, t_start, None])
+                py.extend([top, top, bot, bot, top, None])
+        if px:
+            fig.add_trace(go.Scatter(x=px, y=py, fill='toself', fillcolor=color, line=dict(color='rgba(255,255,255,0)'), name=name, legendgroup='FVG', hoverinfo='skip'), row=2, col=1)
             
-        if not self.trades_df.empty:
-            if 'r_multiple' in self.trades_df.columns:
-                self.trades_df['cumulative_r'] = self.trades_df['r_multiple'].cumsum()
-                self.trades_df['peak_r'] = self.trades_df['cumulative_r'].cummax()
-                self.trades_df['drawdown_r'] = self.trades_df['peak_r'] - self.trades_df['cumulative_r']
+    # Trade entries/exits
+    el_ts = [t.entry_time for t in trades if t.direction == 'LONG']
+    el_p = [t.entry_price for t in trades if t.direction == 'LONG']
+    es_ts = [t.entry_time for t in trades if t.direction == 'SHORT']
+    es_p = [t.entry_price for t in trades if t.direction == 'SHORT']
+    ex_ts = [t.exit_time for t in trades]
+    ex_p = [t.exit_price for t in trades]
+    fig.add_trace(go.Scatter(x=el_ts, y=el_p, mode='markers', marker=dict(symbol='triangle-up', color='#33B5E5', size=14, line=dict(width=1, color='white')), name='Long Entry', legendgroup='Trades'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=es_ts, y=es_p, mode='markers', marker=dict(symbol='triangle-down', color='#FF4444', size=14, line=dict(width=1, color='white')), name='Short Entry', legendgroup='Trades'), row=2, col=1)
+    fig.add_trace(go.Scatter(x=ex_ts, y=ex_p, mode='markers', marker=dict(symbol='x', color='white', size=10), name='Exit', legendgroup='Trades'), row=2, col=1)
+    
+    # 3. Volume (Row 4)
+    if 'volume' in df_c.columns:
+        v_colors = ['#00C851' if o <= c else '#FF4444' for o, c in zip(df_c['open'], df_c['close'])]
+        fig.add_trace(go.Bar(x=df_c['timestamp'], y=df_c['volume'], marker_color=v_colors, name='Volume'), row=4, col=1)
+        
+    # 4. Equity & Underwater (Row 5)
+    if not equity_df.empty:
+        fig.add_trace(go.Scatter(x=equity_df['timestamp'], y=equity_df['peak'], name='Peak', line=dict(color='#00C851', dash='dash')), row=5, col=1)
+        fig.add_trace(go.Scatter(x=equity_df['timestamp'], y=equity_df['equity'], name='Equity', line=dict(color='#33B5E5'), fill='tonexty', fillcolor='rgba(255,68,68,0.2)'), row=5, col=1)
+        
+        # Underwater (-drawdown_pct so it points down)
+        fig.add_trace(go.Scatter(x=equity_df['timestamp'], y=-equity_df['drawdown_pct'], name='Drawdown (%)', fill='tozeroy', fillcolor='rgba(255,68,68,0.5)', line=dict(color='#FF4444')), row=5, col=3)
+        
+    # 5. Session & Pattern (Row 6)
+    sessions = list(stats.breakdown.by_session.keys())
+    win_rates = [stats.breakdown.by_session[s]['win_rate']*100 for s in sessions]
+    fig.add_trace(go.Bar(x=sessions, y=win_rates, marker_color='#33B5E5', name='Win Rate'), row=6, col=1)
+    
+    patterns_lbl = list(stats.breakdown.by_pattern.keys())
+    pat_pnl = [stats.breakdown.by_pattern[p].get('expectancy', 0) for p in patterns_lbl]
+    fig.add_trace(go.Bar(x=patterns_lbl, y=pat_pnl, marker_color='#00C851', name='Avg PnL'), row=6, col=3)
+    
+    # 6. Heatmap & Histogram (Row 7)
+    if not equity_df.empty:
+        df_eq = equity_df.drop_duplicates(subset=['timestamp'], keep='last').set_index('timestamp')
+        monthly = df_eq['equity'].resample('ME').last()
+        if len(monthly) > 0:
+            initial = equity_df['equity'].iloc[0]
+            monthly_ret = monthly.pct_change() * 100
+            monthly_ret.iloc[0] = ((monthly.iloc[0] / initial) - 1) * 100
+            
+            ret_df = pd.DataFrame({'ret': monthly_ret})
+            ret_df['year'] = ret_df.index.year
+            ret_df['month'] = ret_df.index.strftime('%b')
+            pivot = ret_df.pivot(index='year', columns='month', values='ret')
+            months_order = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+            cols = [m for m in months_order if m in pivot.columns]
+            pivot = pivot[cols]
+            
+            # Need to format text properly, substituting NaN with empty string
+            text_vals = []
+            for row in pivot.values:
+                text_vals.append([f"{v:.1f}%" if not np.isnan(v) else "" for v in row])
                 
-                # Determine time for plotting
-                plot_time = self.trades_df.get('exit_time', self.trades_df.get('entry_time', pd.Series(index=self.trades_df.index)))
-                if plot_time.isnull().any() and 'entry_time' in self.trades_df.columns:
-                    plot_time = plot_time.fillna(self.trades_df['entry_time'])
-                self.trades_df['plot_time'] = pd.to_datetime(plot_time)
-
-    def generate_report(self) -> str:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"backtest_report_{timestamp}.html"
-        filepath = os.path.join(self.output_dir, filename)
-        
-        if self.trades_df.empty:
-            html_content = "<html><body><h1>No trades to visualize</h1></body></html>"
-            with open(filepath, 'w') as f:
-                f.write(html_content)
-            return filepath
+            fig.add_trace(go.Heatmap(
+                z=pivot.values, x=pivot.columns, y=pivot.index, 
+                colorscale='RdYlGn', zmid=0, showscale=False,
+                text=text_vals, texttemplate="%{text}", hoverinfo="z"
+            ), row=7, col=1)
             
-        # 1. Equity Curve
-        fig_equity = go.Figure()
-        fig_equity.add_trace(go.Scatter(
-            x=self.trades_df['plot_time'],
-            y=self.trades_df['cumulative_r'],
-            mode='lines',
-            name='Cumulative R',
-            line=dict(color='blue', width=2)
-        ))
-        fig_equity.update_layout(title="Equity Curve (Cumulative R)", xaxis_title="Time", yaxis_title="Cumulative R")
+    r_mults = [t.r_multiple for t in trades]
+    if r_mults:
+        fig.add_trace(go.Histogram(x=r_mults, nbinsx=20, marker_color='#33B5E5', name='R-Multiples'), row=7, col=3)
         
-        # 2. Underwater Chart (Drawdown)
-        fig_drawdown = go.Figure()
-        fig_drawdown.add_trace(go.Scatter(
-            x=self.trades_df['plot_time'],
-            y=-self.trades_df['drawdown_r'], # Negative for underwater visual
-            fill='tozeroy',
-            mode='lines',
-            name='Drawdown (R)',
-            line=dict(color='red', width=1)
-        ))
-        fig_drawdown.update_layout(title="Underwater Chart (Drawdown in R)", xaxis_title="Time", yaxis_title="Drawdown (R)")
-        
-        # 3. Win rate by session (Bar chart)
-        session_stats = self.stats.get('session_performance', {})
-        sessions = list(session_stats.keys())
-        win_rates = [session_stats[s].get('win_rate_pct', 0) for s in sessions]
-        
-        fig_session = go.Figure(data=[
-            go.Bar(name='Win Rate', x=sessions, y=win_rates, marker_color='lightgreen')
-        ])
-        fig_session.update_layout(title="Win Rate by Session (%)", xaxis_title="Session", yaxis_title="Win Rate (%)", yaxis=dict(range=[0, 100]))
-        
-        # 4. Trade distribution histogram (R-multiples)
-        fig_dist = px.histogram(
-            self.trades_df, x="r_multiple", 
-            title="Trade Distribution (R-Multiples)", 
-            labels={"r_multiple": "R-Multiple"},
-            nbins=20,
-            color_discrete_sequence=['purple']
-        )
-        
-        # 5. Monthly returns heatmap
-        fig_heatmap = self._create_heatmap()
-        
-        # Combine into HTML
-        html_content = self._build_html(
-            fig_equity, fig_drawdown, fig_session, fig_dist, fig_heatmap, timestamp
-        )
-        
-        with open(filepath, 'w', encoding='utf-8') as f:
-            f.write(html_content)
-            
-        return filepath
-        
-    def _create_heatmap(self) -> go.Figure:
-        df = self.trades_df.copy()
-        if 'plot_time' not in df.columns or df['plot_time'].isnull().all():
-            return go.Figure().update_layout(title="Monthly Returns (No Time Data)")
-            
-        df['year'] = df['plot_time'].dt.year
-        df['month'] = df['plot_time'].dt.month
-        
-        monthly_returns = df.groupby(['year', 'month'])['r_multiple'].sum().reset_index()
-        monthly_pivot = monthly_returns.pivot(index='year', columns='month', values='r_multiple').fillna(0)
-        
-        # Ensure all 12 months exist as columns
-        for m in range(1, 13):
-            if m not in monthly_pivot.columns:
-                monthly_pivot[m] = 0.0
-                
-        # Sort columns to ensure Jan-Dec order
-        monthly_pivot = monthly_pivot[sorted(monthly_pivot.columns)]
-        
-        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-        
-        fig = go.Figure(data=go.Heatmap(
-            z=monthly_pivot.values,
-            x=month_names,
-            y=monthly_pivot.index,
-            colorscale='RdYlGn',
-            zmid=0
-        ))
-        fig.update_layout(
-            title="Monthly Returns Heatmap (R)", 
-            xaxis_title="Month", 
-            yaxis_title="Year", 
-            yaxis=dict(autorange="reversed", type='category')
-        )
-        return fig
-        
-    def _build_html(self, fig_equity, fig_drawdown, fig_session, fig_dist, fig_heatmap, timestamp: str) -> str:
-        html = f'''
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Backtest Report - {timestamp}</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f9f9f9; }}
-                h1 {{ color: #333; }}
-                .stats-container {{ display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 30px; }}
-                .stat-box {{ background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); flex: 1; min-width: 200px; text-align: center; }}
-                .stat-box h3 {{ margin-top: 0; color: #666; font-size: 14px; text-transform: uppercase; }}
-                .stat-box p {{ margin: 0; font-size: 24px; font-weight: bold; color: #333; }}
-                .chart-container {{ background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 30px; }}
-                .row {{ display: flex; flex-wrap: wrap; gap: 20px; }}
-                .col {{ flex: 1; min-width: 400px; }}
-            </style>
-        </head>
-        <body>
-            <h1>ICT Backtest Report</h1>
-            
-            <div class="stats-container">
-                <div class="stat-box"><h3>Total Trades</h3><p>{self.stats.get('total_trades', 0)}</p></div>
-                <div class="stat-box"><h3>Win Rate</h3><p>{self.stats.get('win_rate_pct', 0):.2f}%</p></div>
-                <div class="stat-box"><h3>Expectancy (R)</h3><p>{self.stats.get('expectancy_r', 0):.2f}</p></div>
-                <div class="stat-box"><h3>Profit Factor</h3><p>{self.stats.get('profit_factor', 0):.2f}</p></div>
-                <div class="stat-box"><h3>Max Drawdown (R)</h3><p>{self.stats.get('max_drawdown_dollar', 0) / self.stats.get('avg_win_dollar', 1) * self.stats.get('avg_win_r', 1) if self.stats.get('avg_win_dollar') else 0:.2f}</p></div>
-            </div>
-            
-            <div class="chart-container">
-                {fig_equity.to_html(full_html=False, include_plotlyjs='cdn')}
-            </div>
-            
-            <div class="chart-container">
-                {fig_drawdown.to_html(full_html=False, include_plotlyjs=False)}
-            </div>
-            
-            <div class="row">
-                <div class="col chart-container">
-                    {fig_dist.to_html(full_html=False, include_plotlyjs=False)}
-                </div>
-                <div class="col chart-container">
-                    {fig_session.to_html(full_html=False, include_plotlyjs=False)}
-                </div>
-            </div>
-            
-            <div class="chart-container">
-                {fig_heatmap.to_html(full_html=False, include_plotlyjs=False)}
-            </div>
-        </body>
-        </html>
-        '''
-        return html
-
-def generate_visual_report(trades_df: pd.DataFrame, stats: Dict[str, Any], output_dir: str = 'reports') -> str:
-    """Helper function to instantiate and run the visualizer."""
-    visualizer = ReportVisualizer(trades_df, stats, output_dir)
-    return visualizer.generate_report()
+    # 7. Table (Row 8)
+    fig.add_trace(go.Table(
+        header=dict(values=['Metric', 'Value'], fill_color='#2c2c2c', font=dict(color='white')),
+        cells=dict(values=[
+            ['Median Drawdown', '95% Drawdown', '5% Drawdown', 'Prob of Ruin'],
+            [f"{stats.monte_carlo.median_drawdown_pct:.2f}%", f"{stats.monte_carlo.p95_drawdown_pct:.2f}%", 
+             f"{stats.monte_carlo.p05_drawdown_pct:.2f}%", f"{stats.monte_carlo.probability_of_ruin_pct:.2f}%"]
+        ], fill_color='#1c1c1c', font=dict(color='white'))
+    ), row=8, col=1)
+    
+    # Layout and Buttons
+    vis_all = [True] * len(fig.data)
+    vis_no_fvg = [False if t.name and 'FVG' in t.name else True for t in fig.data]
+    vis_no_struct = [False if t.name and ('BOS' in t.name or 'CHoCH' in t.name) else True for t in fig.data]
+    
+    fig.update_layout(
+        template='plotly_dark',
+        height=1800,
+        title="ICT Backtester Pro - Interactive Report",
+        showlegend=True,
+        xaxis_rangeslider_visible=False,
+        updatemenus=[dict(
+            type="buttons", direction="right", x=0.0, y=1.02, showactive=True,
+            buttons=[
+                dict(label="All Layers", method="update", args=[{"visible": vis_all}]),
+                dict(label="Hide FVGs", method="update", args=[{"visible": vis_no_fvg}]),
+                dict(label="Hide Structure", method="update", args=[{"visible": vis_no_struct}])
+            ]
+        )]
+    )
+    
+    os.makedirs(output_dir, exist_ok=True)
+    filename = os.path.join(output_dir, f"ict_backtest_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html")
+    fig.write_html(filename)
+    return filename
