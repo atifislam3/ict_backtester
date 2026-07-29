@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime, timedelta
 import pandas as pd
 from src.events import EventBus, CandleEvent, PatternEvent
-from src.models import Candle, ConfigSchema, DateRange, RiskSettings, SessionTimes, SessionTime, PatternParams
+from src.models import Candle, ConfigSchema, DateRange, RiskSchema, SessionsSchema, PatternsSchema, InstrumentSchema, ExecutionSchema
 from src.pattern_detector import DetailedPatternEvent
 from src.backtest_engine import EventDrivenBacktester
 
@@ -13,15 +13,13 @@ def create_candle(idx, o, h, l, c):
 @pytest.fixture
 def config():
     return ConfigSchema(
-        instrument='EURUSD', timeframe='1H',
+        instrument=InstrumentSchema(symbol='EURUSD=X', display_name='EURUSD'),
+        timeframe='1H',
         date_range=DateRange(start='2024-01-01', end='2024-01-31'),
-        risk_settings=RiskSettings(risk_per_trade_pct=1.0, rr_ratio=2.0, spread_pips=2.0),
-        session_times=SessionTimes(
-            london=SessionTime(start='03:00', end='11:00'),
-            ny=SessionTime(start='08:00', end='17:00'),
-            asian=SessionTime(start='19:00', end='03:00')
-        ),
-        pattern_params=PatternParams()
+        risk=RiskSchema(risk_per_trade=0.01, rr_ratio=2.0, atr_multiplier=1.5, max_daily_risk=0.03),
+        execution=ExecutionSchema(spread_pips=2.0),
+        sessions=SessionsSchema(),
+        patterns=PatternsSchema()
     )
 
 def test_no_lookahead_bias(config):
@@ -99,7 +97,7 @@ def test_circuit_breaker(config):
 def test_spread_commission_impact(config):
     bus = EventBus()
     # Force 0 slippage by mocking random, set spread to 2 pips
-    config.risk_settings.spread_pips = 2.0 
+    config.execution.spread_pips = 2.0  
     engine = EventDrivenBacktester(bus, config, initial_capital=10000.0)
     
     bus.emit(CandleEvent(candle=create_candle(0, 1.1000, 1.1020, 1.0980, 1.1010)))

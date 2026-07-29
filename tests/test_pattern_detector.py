@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime, timedelta
-from src.models import Candle, PatternParams
+from src.models import Candle, PatternsSchema
 from src.events import EventBus, CandleEvent, PatternEvent
 from src.pattern_detector import PatternDetector, DetailedPatternEvent, SwingPoint
 
@@ -11,7 +11,7 @@ def create_candle(idx, o, h, l, c):
 @pytest.fixture
 def detector():
     bus = EventBus()
-    return PatternDetector(bus, PatternParams(), pivot_lookback=2)
+    return PatternDetector(bus, PatternsSchema(), pivot_lookback=2)
 
 def test_no_pattern_without_lookback(detector):
     emitted = []
@@ -71,7 +71,7 @@ def test_zero_lookahead_emission(detector):
 
 def test_bullish_bos():
     bus = EventBus()
-    det = PatternDetector(bus, PatternParams(), pivot_lookback=1)
+    det = PatternDetector(bus, PatternsSchema(), pivot_lookback=1)
     emitted = []
     bus.subscribe(PatternEvent, lambda e: emitted.append(e))
     
@@ -102,7 +102,7 @@ def test_bullish_bos():
 
 def test_bearish_choch():
     bus = EventBus()
-    det = PatternDetector(bus, PatternParams(), pivot_lookback=1)
+    det = PatternDetector(bus, PatternsSchema(), pivot_lookback=1)
     emitted = []
     bus.subscribe(PatternEvent, lambda e: emitted.append(e))
     
@@ -142,7 +142,7 @@ def test_bearish_choch():
 
 def test_conflicting_patterns_same_candle():
     bus = EventBus()
-    det = PatternDetector(bus, PatternParams(), pivot_lookback=1)
+    det = PatternDetector(bus, PatternsSchema(), pivot_lookback=1)
     emitted = []
     bus.subscribe(PatternEvent, lambda e: emitted.append(e))
     

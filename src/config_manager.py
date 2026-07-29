@@ -44,13 +44,7 @@ class ConfigManager:
             # Type cast based on value
             parsed_value = self._parse_env_value(value)
             
-            # Special case mapping as requested
-            if env_key == "risk_per_trade":
-                if "risk_settings" not in config:
-                    config["risk_settings"] = {}
-                config["risk_settings"]["risk_per_trade_pct"] = parsed_value
-                continue
-                
+
             # Generic nested mapping (e.g. ICT_RISK_SETTINGS__RR_RATIO)
             if "__" in env_key:
                 parts = env_key.split("__")

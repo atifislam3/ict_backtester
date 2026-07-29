@@ -24,7 +24,7 @@ def _run_engine(candles: List[Candle], config: ConfigSchema) -> Tuple[List[Trade
     bus = EventBus()
     # Pattern detector is required to emit pattern events!
     # Without it, the engine receives no signals.
-    detector = PatternDetector(bus, config.pattern_params)
+    detector = PatternDetector(bus, config.patterns)
     engine = EventDrivenBacktester(bus, config)
     
     for c in candles:

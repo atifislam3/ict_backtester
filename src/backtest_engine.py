@@ -67,9 +67,9 @@ class EventDrivenBacktester:
         self.candles: List[Candle] = []
         self.current_index = -1
         
-        self.sizer = PositionSizer(risk_pct=config.risk_settings.risk_per_trade_pct)
+        self.sizer = PositionSizer(risk_pct=config.risk.risk_per_trade * 100.0)
         
-        self.max_daily_risk_pct = 5.0 # configurable circuit breaker
+        self.max_daily_risk_pct = config.risk.max_daily_risk * 100.0
         self.daily_pnl = 0.0
         self.current_day: Optional[datetime.date] = None
         self.circuit_breaker_active = False
@@ -126,7 +126,7 @@ class EventDrivenBacktester:
                 # Limit order at 50% gap fill
                 fill_price = event.price_levels.get('fill_price', event.price_level)
                 sl = fill_price - (atr * 1.5) if event.direction == 'BULLISH' else fill_price + (atr * 1.5)
-                tp = fill_price + (abs(fill_price - sl) * self.config.risk_settings.rr_ratio) if event.direction == 'BULLISH' else fill_price - (abs(fill_price - sl) * self.config.risk_settings.rr_ratio)
+                tp = fill_price + (abs(fill_price - sl) * self.config.risk.rr_ratio) if event.direction == 'BULLISH' else fill_price - (abs(fill_price - sl) * self.config.risk.rr_ratio)
                 
                 size = self.sizer.calculate_size(self.equity, fill_price, sl)
                 if size > 0:
@@ -141,7 +141,7 @@ class EventDrivenBacktester:
         elif event.pattern_type in ('BOS', 'CHoCH'):
             # Stop order at the break level
             sl = event.price_level - (atr * 1.5) if event.direction == 'BULLISH' else event.price_level + (atr * 1.5)
-            tp = event.price_level + (abs(event.price_level - sl) * self.config.risk_settings.rr_ratio) if event.direction == 'BULLISH' else event.price_level - (abs(event.price_level - sl) * self.config.risk_settings.rr_ratio)
+            tp = event.price_level + (abs(event.price_level - sl) * self.config.risk.rr_ratio) if event.direction == 'BULLISH' else event.price_level - (abs(event.price_level - sl) * self.config.risk.rr_ratio)
             
             size = self.sizer.calculate_size(self.equity, event.price_level, sl)
             if size > 0:
@@ -155,7 +155,7 @@ class EventDrivenBacktester:
         else:
             # Default market order
             sl = c.close - (atr * 1.5) if event.direction == 'BULLISH' else c.close + (atr * 1.5)
-            tp = c.close + (abs(c.close - sl) * self.config.risk_settings.rr_ratio) if event.direction == 'BULLISH' else c.close - (abs(c.close - sl) * self.config.risk_settings.rr_ratio)
+            tp = c.close + (abs(c.close - sl) * self.config.risk.rr_ratio) if event.direction == 'BULLISH' else c.close - (abs(c.close - sl) * self.config.risk.rr_ratio)
             size = self.sizer.calculate_size(self.equity, c.close, sl)
             if size > 0:
                 order = Order(
@@ -190,8 +190,8 @@ class EventDrivenBacktester:
             fill_price = 0.0
             slippage = 0.0
             
-            pip_size = 0.01 if self.config.instrument == 'XAUUSD' else 0.0001
-            half_spread = (self.config.risk_settings.spread_pips / 2.0) * pip_size
+            pip_size = 0.01 if 'XAU' in self.config.instrument.symbol else 0.0001
+            half_spread = (self.config.execution.spread_pips / 2.0) * pip_size
             
             if order.order_type == 'MARKET':
                 fill_price = c.open
@@ -261,8 +261,8 @@ class EventDrivenBacktester:
                     
             if close_price is not None:
                 # Calculate PnL
-                pip_size = 0.01 if self.config.instrument == 'XAUUSD' else 0.0001
-                half_spread = (self.config.risk_settings.spread_pips / 2.0) * pip_size
+                pip_size = 0.01 if 'XAU' in self.config.instrument.symbol else 0.0001
+                half_spread = (self.config.execution.spread_pips / 2.0) * pip_size
                 actual_exit = close_price - half_spread if trade['direction'] == 'LONG' else close_price + half_spread
                 
                 commission = 7.0 * trade['size']

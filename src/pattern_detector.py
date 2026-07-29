@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 from src.events import EventBus, CandleEvent, PatternEvent
-from src.models import Candle, PatternParams
+from src.models import Candle, PatternsSchema
 
 @dataclass(kw_only=True)
 class SwingPoint:
@@ -185,7 +185,7 @@ def detect_choch(candles: List[Candle], swings: List[SwingPoint], index: int) ->
     return None
 
 class PatternDetector:
-    def __init__(self, event_bus: EventBus, params: PatternParams, pivot_lookback: int = 5):
+    def __init__(self, event_bus: EventBus, params: PatternsSchema, pivot_lookback: int = 5):
         self.event_bus = event_bus
         self.params = params
         self.pivot_lookback = pivot_lookback

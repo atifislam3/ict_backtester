@@ -1,0 +1,34 @@
+instrument:
+  symbol: "XAUUSD=X"
+  display_name: "XAUUSD"
+
+timeframe: "1H"
+date_range:
+  start: "2023-01-01"
+  end: "2024-01-01"
+
+risk:
+  risk_per_trade: 0.01  # 1% of equity
+  rr_ratio: 2.0
+  atr_multiplier: 1.5
+  max_daily_risk: 0.03  # 3% daily stop out
+
+execution:
+  spread_pips: 2.0  # XAUUSD
+  slippage_pips: 0.5
+  commission_per_lot: 7.0
+
+sessions:
+  asian: "20:00-00:00"
+  london: "03:00-11:00"
+  ny: "08:00-17:00"
+  overlap: "08:00-11:00"
+
+patterns:
+  pivot_lookback: 5
+  min_swing_count: 3
+  fvg_min_size_pips: 0.5
+
+reporting:
+  output_dir: "reports"
+  save_json: true
