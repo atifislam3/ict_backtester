@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 import pandas as pd
 import pytz
+import yfinance as yf
 
 # Setup module-level logger
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -201,38 +202,60 @@ def load_data(
     force_download: bool = False
 ) -> pd.DataFrame:
     """
-    Main entry point for loading data. Checks cache first, downloads if missing.
-    
-    Args:
-        instrument (str): The instrument name.
-        timeframe (str): Target timeframe.
-        start_date (str): Start date (YYYY-MM-DD).
-        end_date (str): End date (YYYY-MM-DD).
-        raw_dir (str): Raw data directory.
-        processed_dir (str): Processed data directory.
-        force_download (bool): If True, ignores cache and downloads fresh data.
-        
-    Returns:
-        pd.DataFrame: Processed OHLC dataframe.
+    Loads data using yfinance instead of dukascopy to remove Node.js dependency.
     """
     cache_path = Path(processed_dir) / f"{instrument}_{timeframe}.parquet"
+    os.makedirs(processed_dir, exist_ok=True)
     
-    # Set up timezone aware start and end dates for filtering
     start_dt = pd.to_datetime(start_date).tz_localize('America/New_York')
-    # Use end of the day for end_dt
     end_dt = pd.to_datetime(end_date).replace(hour=23, minute=59, second=59).tz_localize('America/New_York')
     
     if not force_download and cache_path.exists():
         logger.info(f"Loading cached data from {cache_path}")
         df = pd.read_parquet(cache_path)
+        mask = (df.index >= start_dt) & (df.index <= end_dt)
+        return df.loc[mask]
+        
+    logger.info("Fetching new data from yfinance...")
+    
+    # Map instrument to yfinance ticker
+    ticker = instrument.upper()
+    if ticker == 'XAUUSD':
+        ticker = 'GC=F'
+    elif ticker == 'EURUSD':
+        ticker = 'EURUSD=X'
+        
+    # Map timeframe
+    tf_map = {'1M': '1m', '5M': '5m', '15M': '15m', '1H': '1h', '4H': '4h', '1D': '1d'}
+    yf_tf = tf_map.get(timeframe.upper(), '1h')
+    
+    try:
+        # yfinance historical data
+        ticker_obj = yf.Ticker(ticker)
+        # Note: 1h data is only available for 730 days max in yfinance
+        df = ticker_obj.history(start=start_date, end=end_date, interval=yf_tf)
+        
+        if df.empty:
+            logger.error(f"yfinance returned no data for {ticker} from {start_date} to {end_date}.")
+            return pd.DataFrame()
+            
+        # Standardize columns
+        df.columns = [col.lower() for col in df.columns]
+        df.index.name = 'datetime'
+        
+        # Ensure correct timezone
+        if df.index.tz is None:
+            df.index = df.index.tz_localize('UTC').tz_convert('America/New_York')
+        else:
+            df.index = df.index.tz_convert('America/New_York')
+            
+        # Cache to parquet
+        df.to_parquet(cache_path)
+        logger.info(f"Processed data cached to {cache_path}")
         
         mask = (df.index >= start_dt) & (df.index <= end_dt)
         return df.loc[mask]
         
-    logger.info("Cache not found or force_download=True. Fetching new data.")
-    csv_path = download_dukascopy_data(instrument, start_date, end_date, raw_dir)
-    
-    df = process_and_cache_data(csv_path, instrument, timeframe, processed_dir)
-    
-    mask = (df.index >= start_dt) & (df.index <= end_dt)
-    return df.loc[mask]
+    except Exception as e:
+        logger.error(f"Failed to fetch data from yfinance: {e}")
+        return pd.DataFrame()
