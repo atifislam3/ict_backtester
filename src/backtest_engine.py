@@ -67,7 +67,8 @@ class EventDrivenBacktester:
         self.candles: List[Candle] = []
         self.current_index = -1
         
-        self.sizer = PositionSizer(risk_pct=config.risk.risk_per_trade * 100.0)
+        contract_size = 100 if 'XAU' in config.instrument.symbol or 'GC=F' in config.instrument.symbol else 100000
+        self.sizer = PositionSizer(risk_pct=config.risk.risk_per_trade * 100.0, contract_size=contract_size)
         
         self.max_daily_risk_pct = config.risk.max_daily_risk * 100.0
         self.daily_pnl = 0.0
@@ -267,15 +268,16 @@ class EventDrivenBacktester:
                 
                 commission = 7.0 * trade['size']
                 
+                contract_size = 100 if 'XAU' in self.config.instrument.symbol or 'GC=F' in self.config.instrument.symbol else 100000
                 if trade['direction'] == 'LONG':
-                    pnl = (actual_exit - trade['entry_price']) * (trade['size'] * 100000) - commission
+                    pnl = (actual_exit - trade['entry_price']) * (trade['size'] * contract_size) - commission
                 else:
-                    pnl = (trade['entry_price'] - actual_exit) * (trade['size'] * 100000) - commission
+                    pnl = (trade['entry_price'] - actual_exit) * (trade['size'] * contract_size) - commission
                     
                 self.equity += pnl
                 self.daily_pnl += pnl
                 
-                risk_amount = abs(trade['entry_price'] - trade['stop_loss']) * (trade['size'] * 100000)
+                risk_amount = abs(trade['entry_price'] - trade['stop_loss']) * (trade['size'] * contract_size)
                 r_multiple = pnl / risk_amount if risk_amount > 0 else 0.0
                 
                 res = TradeResult(
