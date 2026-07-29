@@ -3,6 +3,7 @@ from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
 from src.pattern_detector import Direction, FVGEvent, StructureEvent, detect_fvgs, detect_structure_events
 import logging
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ class BacktestEngine:
             # Structure breaks are confirmed on the very candle they occur
             struct_by_time.setdefault(ev.timestamp, []).append(ev)
             
-        for i in range(len(self.df)):
+        for i in tqdm(range(len(self.df)), desc="Running Backtest"):
             curr_time = self.df.index[i]
             candle = self.df.iloc[i]
             
