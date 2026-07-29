@@ -35,8 +35,8 @@ The engine realistically simulates trade execution complete with spread, slippag
 Clone the repository and install the required dependencies.
 
 ```bash
-git clone https://github.com/yourusername/ict-backtester-pro.git
-cd ict-backtester-pro
+git clone https://github.com/atifislam3/ict_backtester.git
+cd ict_backtester
 
 # Create a virtual environment (optional but recommended)
 python -m venv venv
